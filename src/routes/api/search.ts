@@ -6,7 +6,9 @@ import * as cheerio from 'cheerio'
 const BASE_URL = `https://www.biblegateway.com/passage/?`
 
 const transliterate = (str: string) => {
-  return unidecode(str.replace(/¶/g, '').replace(/ +/g, ' ')).trim() as string
+  return unidecode(
+    str.replace(/¶/g, '').replace(/(?<=\w[.,;])(?=\w)|(?<=")(?=")| {2,}/g, ' ')
+  ).trim() as string
 }
 
 const createError = ({
@@ -27,10 +29,11 @@ const createError = ({
   }
 }
 
-const getData = async (ref, version) => {
+const getData = async (ref, version, ignoreDev) => {
   ref = encodeURIComponent(ref)
   version = encodeURIComponent(version)
-  if (dev) {
+
+  if (dev && ignoreDev === null) {
     switch (version) {
       case 'NIV':
         return (await import('./_test')).TEST_NIV
@@ -46,9 +49,8 @@ const getData = async (ref, version) => {
     }
   }
 
-  const url = `${BASE_URL}?search=${ref}&version=${version}`
+  const url = `${BASE_URL}search=${ref}&version=${version}`
   const res = await fetch(url)
-
   if (!res.ok) return res.status
   return await res.text()
 }
@@ -114,7 +116,7 @@ const extractVerses = ($: cheerio.CheerioAPI, passage: cheerio.Element) => {
 
       return {
         refID,
-        reference: `${BOOKS.getName(bookID) || bookID} ${chapter}:${verse}${
+        ref: `${BOOKS.getName(bookID) || bookID} ${chapter}:${verse}${
           toVerse ? `-${toVerse}` : ``
         }`,
         bookID,
@@ -137,7 +139,7 @@ const extractVerses = ($: cheerio.CheerioAPI, passage: cheerio.Element) => {
       },
       [] as {
         refID: string
-        reference: string
+        ref: string
         bookID: string
         book: string
         chapter: number
@@ -152,7 +154,7 @@ const extractVerses = ($: cheerio.CheerioAPI, passage: cheerio.Element) => {
 const extractRefID = (
   verses: {
     refID: string
-    reference: string
+    ref: string
     bookID: string
     book: string
     chapter: number
@@ -196,8 +198,12 @@ const extractPassage = ($: cheerio.CheerioAPI, passage: cheerio.Element) => {
   }
 }
 
+/**
+ * @type {import('@sveltejs/kit').RequestHandler}
+ */
 export async function get({ query }) {
   const ref = query.get('ref') || undefined
+  const ignoreDev = query.get('IGNORE_DEV')
   const version = VERSIONS.getId(query.get('version'))
 
   // error if ref or version is not specified
@@ -207,7 +213,7 @@ export async function get({ query }) {
       data: { ref, version }
     })
 
-  const text = await getData(ref, version)
+  const text = await getData(ref, version, ignoreDev)
 
   // error if page is not loaded
   if (typeof text === 'number')
@@ -248,12 +254,9 @@ export async function get({ query }) {
     .toArray()
 
   return {
-    // body: transliterate(
-    //   `<html>${passages[0].passage}${passages[1].passage}${passages[2].passage}${passages[3].passage}</html>`
-    // )
     body: {
-      searchRef: ref,
-      searchVersion: version,
+      searchRef: ref as string,
+      searchVersion: version as string,
       passages
     }
   }
