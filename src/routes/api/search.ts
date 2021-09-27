@@ -1,4 +1,4 @@
-import { VERSIONS, BOOKS } from '../_data'
+import { VERSIONS, BOOKS } from '$lib/bibleData'
 import { dev } from '$app/env'
 import unidecode from 'unidecode'
 import * as cheerio from 'cheerio'
@@ -36,13 +36,13 @@ const getData = async (ref, version, ignoreDev) => {
   if (dev && ignoreDev === null) {
     switch (version) {
       case 'NIV':
-        return (await import('./_test')).TEST_NIV
+        return (await import('$lib/devHTML')).TEST_NIV
       case 'ESV':
-        return (await import('./_test')).TEST_ESV
+        return (await import('$lib/devHTML')).TEST_ESV
       case 'MSG':
-        return (await import('./_test')).TEST_MSG
+        return (await import('$lib/devHTML')).TEST_MSG
       case 'VOICE':
-        return (await import('./_test')).TEST_VOICE
+        return (await import('$lib/devHTML')).TEST_VOICE
       default:
         if (ref === 'FAIL_REFERENCE') return `<html><body><h1>Ref not found</h1></body></html>`
         return 404
