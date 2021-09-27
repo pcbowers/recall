@@ -30,7 +30,9 @@ const generalHTTPError = ({
   }
 }
 
-const deserializeHTML = ($: cheerio.CheerioAPI) => {}
+const deserializeHTML = ($: cheerio.CheerioAPI) => {
+  return null
+}
 
 const removeElement = ($: cheerio.CheerioAPI, selectors: string | string[]) => {
   if (!Array.isArray(selectors)) selectors = [selectors]
