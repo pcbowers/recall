@@ -46,7 +46,7 @@
     if (aborter) aborter.abort()
     aborter = new window.AbortController()
     const res = await fetch(
-      `./api/search?ref=${encodeURIComponent(ref)}&version=${encodeURIComponent(
+      `./api/search2?ref=${encodeURIComponent(ref)}&version=${encodeURIComponent(
         version
       )}&IGNORE_DEV`,
       { signal: aborter.signal }
