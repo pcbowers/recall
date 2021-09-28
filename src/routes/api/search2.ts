@@ -30,14 +30,59 @@ const generalHTTPError = ({
   }
 }
 
-const deserializeHTML = ($: cheerio.CheerioAPI) => {
-  return null
+const generalDeserializer =
+  (type: string) =>
+  (marks = []) =>
+  (children, ...data) => {
+    if (typeof children === 'string')
+      return {
+        type,
+        marks,
+        text: children,
+        ...data
+      }
+
+    return { type, marks, children, ...data }
+  }
+
+const CHECK_BLOCK = {
+  P: 'block',
+  DIV: 'block'
 }
 
-const removeElement = ($: cheerio.CheerioAPI, selectors: string | string[]) => {
+const deserializeHTML = ($: cheerio.CheerioAPI, selector: string | cheerio.Node) => {
+  const tagName = $(selector).prop('tagName')
+  const type = CHECK_BLOCK[tagName || ''] || 'span'
+  const defaultMarks = type === 'span' && tagName && tagName !== 'SPAN' ? [tagName] : []
+  let children
+
+  if (typeof selector !== 'string')
+    children = selector.nodeType === 3 ? $(selector).text() || '' : undefined
+
+  if (children === undefined)
+    children = $(selector)
+      .contents()
+      .map((i, el) => {
+        return deserializeHTML($, el)
+      })
+      .toArray()
+
+  const marks = defaultMarks.concat($(selector).attr('class')?.split(' ') || [])
+
+  return generalDeserializer(type)(marks)(children)
+}
+
+const removeElements = ($: cheerio.CheerioAPI, selectors: string | string[]) => {
   if (!Array.isArray(selectors)) selectors = [selectors]
   selectors.forEach((selector) => {
     $(selector).remove()
+  })
+}
+
+const unwrapElements = ($: cheerio.CheerioAPI, selectors: string | string[]) => {
+  if (!Array.isArray(selectors)) selectors = [selectors]
+  selectors.forEach((selector) => {
+    $(selector).contents().unwrap()
   })
 }
 
@@ -107,7 +152,8 @@ const getBibleSite = async ({ ref = '', version = '' }) => {
         })
       default:
         return await getWebsiteHTML({
-          customDevHTML: `<html><body><h1>Ref not found</h1></body></html>`
+          customDevHTML: `<html><body><h1>Ref not found</h1></body></html>`,
+          searchSelector: '.passage-col'
         })
     }
   }
@@ -133,7 +179,7 @@ export const get: RequestHandler = async ({ query }) => {
       data: { ref, version: version }
     })
 
-  removeElement($, [
+  removeElements($, [
     'sup.crossreference',
     'sup.footnote',
     'div.crossrefs',
@@ -141,11 +187,46 @@ export const get: RequestHandler = async ({ query }) => {
     'a',
     'div.long-aside',
     'div.short-aside',
-    'div.copyright-table'
+    'div.copyright-table',
+    'div.dropdowns',
+    'div.clearfix'
   ])
+
+  unwrapElements($, [
+    'div.poetry',
+    'span.indent-1',
+    'span.indent-1-breaks',
+    'div.top-1',
+    'div.dropdown-display',
+    'div.dropdown-display-text',
+    'div.text-html',
+    'div.passage-content',
+    'h1.passage-display'
+  ])
+
+  // $('p:nth-child(21) > span.text.Rom-3-19')
+  //   .contents()
+  //   .each((i, el) => {
+  //     console.log(el.nodeType)
+  //     if (el.nodeType === 3) console.log({ daata: el.data, bro: $(el).text() })
+  //   })
+
+  const bro = (items) => {
+    return items
+      .map((item) => {
+        if (item.children) return bro(item.children)
+        return item.text
+      })
+      .join('')
+  }
+
+  const test = deserializeHTML($, '.passage-text')
+
+  const test2 = bro(test.children)
+  console.log(test2)
 
   return {
     status: 200,
-    body: transliterate($('.passage-text').html())
+    body: test
   }
 }
