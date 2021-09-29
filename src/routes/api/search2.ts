@@ -145,7 +145,7 @@ const addMarks = (
   attributes: Record<string, string>,
   oldMarkDefs: Record<string, any>[]
 ): [string[], Record<string, any>[]] => {
-  const predefinedMarks = ['strong', 'em', 'sup', 'underline', 'strike-through']
+  const predefinedMarks = ['strong', 'em', 'sup', 'underline', 'strike-through', 'br']
   const marks = []
   const newMarkDefs = []
   if (predefinedMarks.includes(tag)) marks.push(tag)
