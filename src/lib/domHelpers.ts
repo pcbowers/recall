@@ -15,6 +15,7 @@ export const filterHTML = ($: CheerioAPI, selector: string) => {
     ]
       .join('')
       .replace(/<!--.*?-->/g, '')
+      .replace(/\n/g, '')
   )
 }
 
