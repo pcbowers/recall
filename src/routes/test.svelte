@@ -1,25 +1,48 @@
 <script type="ts">
   import { onMount } from 'svelte'
-  let data
+  import type { Search } from 'src/types'
+  import PortableText from '@portabletext/svelte'
+  import ChapterNum from '$lib/components/ChapterNum.svelte'
+  import VerseNum from '$lib/components/VerseNum.svelte'
+  import Reference from '$lib/components/Reference.svelte'
+  import Br from '$lib/components/Br.svelte'
+  import Hang from '$lib/components/Hang.svelte'
+  import Poetry from '$lib/components/Poetry.svelte'
+  import Indent from '$lib/components/Indent.svelte'
+  import ShortAside from '$lib/components/ShortAside.svelte'
+  import LongAside from '$lib/components/LongAside.svelte'
 
-  const toPlainText = (blocks = []) => {
-    return blocks
-      .map((block) => {
-        if (block._type !== 'block' || !block.children || block.style.includes('aside')) return ''
-        return `<p>${block.children
-          .map((child) => {
-            if (child.marks.includes('chapternum') || child.marks.includes('versenum')) return ''
-            return child.text
-          })
-          .join('')}</p>`
-      })
-      .join('\n')
-  }
+  let data: Search
 
   onMount(async () => {
     const res = await fetch(`/api/search2?ref=gen1-3&version=voice`)
-    data = (await res.json()).passages.map((passage) => toPlainText(passage.content)).join('\n\n')
+    data = await res.json()
   })
 </script>
 
-<div class="prose">{@html data}</div>
+<div class="prose m-4">
+  {#if data}
+    {#each data.passages as passage}
+      <PortableText
+        blocks={passage.content}
+        serializers={{
+          marks: {
+            chapternum: ChapterNum,
+            versenum: VerseNum,
+            reference: Reference,
+            br: Br
+          },
+          blockStyles: {
+            hang: Hang,
+            poetry: Poetry,
+            indent: Indent,
+            'long-aside': LongAside,
+            'short-aside': ShortAside
+          }
+        }}
+      />
+    {/each}
+  {:else}
+    Loading...
+  {/if}
+</div>
