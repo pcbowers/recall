@@ -6,6 +6,7 @@
   import Reference from '$lib/components/Reference.svelte'
   import Br from '$lib/components/Br.svelte'
   import Hang from '$lib/components/Hang.svelte'
+  import Center from '$lib/components/Center.svelte'
   import Poetry from '$lib/components/Poetry.svelte'
   import Indent from '$lib/components/Indent.svelte'
   import ShortAside from '$lib/components/ShortAside.svelte'
@@ -112,6 +113,7 @@
                 hang: Hang,
                 poetry: Poetry,
                 indent: Indent,
+                center: Center,
                 'long-aside': LongAside,
                 'short-aside': ShortAside
               }
