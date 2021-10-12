@@ -143,8 +143,8 @@ const addStyle = (tag: string, attributes: Record<string, string>): string => {
 const addMarks = (
   tag: string,
   attributes: Record<string, string>,
-  oldMarkDefs: Record<string, any>[]
-): [string[], Record<string, any>[]] => {
+  oldMarkDefs: Record<string, unknown>[]
+): [string[], Record<string, unknown>[]] => {
   const predefinedMarks = ['strong', 'em', 'sup', 'underline', 'strike-through', 'br']
   const marks = []
   const newMarkDefs = []
@@ -247,7 +247,7 @@ export const get: RequestHandler = async ({ query }) => {
 
   // replace class names with the ones desired
   replaceClass($, 'html', /^line$/, 'poetry')
-  replaceClass($, 'html', /^left/, 'ident')
+  replaceClass($, 'html', /^left/, 'indent')
   replaceClass($, 'html', /^hang/, 'hang')
 
   // replace tag names with the ones desired
@@ -262,6 +262,9 @@ export const get: RequestHandler = async ({ query }) => {
 
   // make sure any remmant spans are unwrapped
   unwrapElements($, 'html', 'span:not([class])')
+
+  // make contents of br equal to a new line
+  $('br', 'html').text('\n')
 
   // deserialize passages
   const passages = $('.passage-text')

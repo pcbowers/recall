@@ -186,8 +186,8 @@ export const deserializeHTML = (
   addMarks: (
     tag: string,
     attributes: Record<string, string>,
-    oldMarkDefs: Record<string, any>[]
-  ) => [string[], Record<string, any>[]]
+    oldMarkDefs: Record<string, unknown>[]
+  ) => [string[], Record<string, unknown>[]]
 ) => {
   return $(mainSelector)
     .eq(selectorIndex)
