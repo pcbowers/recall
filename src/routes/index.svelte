@@ -1,35 +1,23 @@
 <script lang="ts">
+  import type { Search } from 'src/types'
+  import PortableText from '@portabletext/svelte'
+  import ChapterNum from '$lib/components/ChapterNum.svelte'
+  import VerseNum from '$lib/components/VerseNum.svelte'
+  import Reference from '$lib/components/Reference.svelte'
+  import Br from '$lib/components/Br.svelte'
+  import Hang from '$lib/components/Hang.svelte'
+  import Poetry from '$lib/components/Poetry.svelte'
+  import Indent from '$lib/components/Indent.svelte'
+  import ShortAside from '$lib/components/ShortAside.svelte'
+  import LongAside from '$lib/components/LongAside.svelte'
+
   let theme = 'dark'
   let hover = false
   let byVerses = false
   let aborter = null
   let version = 'niv'
   let ref = 'Genesis 1, rom 1-5, john 3:16, john 1:12-7:14'
-  let data:
-    | {
-        searchRef: string
-        searchVersion: string
-        passages: {
-          refID: string
-          ref: string
-          versionID: string
-          version: string
-          passageFormatted: string
-          passage: string
-          verses: {
-            refID: string
-            ref: string
-            bookID: string
-            book: string
-            chapter: number
-            verse: number
-            toVerse?: number
-            textFormatted: string
-            text: string
-          }[]
-        }[]
-      }
-    | string = 'Press Get Data to begin!'
+  let data: Search | string = 'Press Get Data to begin!'
 
   const toggleTheme = () => {
     theme = theme === 'dark' ? 'light' : 'dark'
@@ -46,9 +34,7 @@
     if (aborter) aborter.abort()
     aborter = new window.AbortController()
     const res = await fetch(
-      `./api/search2?ref=${encodeURIComponent(ref)}&version=${encodeURIComponent(
-        version
-      )}&IGNORE_DEV`,
+      `./api/search?ref=${encodeURIComponent(ref)}&version=${encodeURIComponent(version)}`,
       { signal: aborter.signal }
     )
     aborter = null
@@ -79,7 +65,7 @@
         }}>Cancel Fetch</button
       >
     {/if}
-    <button class="btn btn-accent" on:click={toggleVerses}>Toggle Verses</button>
+    <button class="btn btn-accent" on:click={toggleVerses} disabled>Toggle Verses</button>
     <br />
     <br />
     <input
@@ -111,21 +97,27 @@
       {#if data && typeof data === 'string'}
         {data}
       {:else if data && typeof data !== 'string'}
-        {#if !byVerses}
-          {#each data.passages as passage}
-            <h1>{passage.ref} ({passage.refID}) ({passage.verses.length} verses)</h1>
-            <h3>{passage.version} ({passage.versionID})</h3>
-            {@html passage.passageFormatted}
-          {/each}
-        {:else}
-          {#each data.passages as passage}
-            <h1>{passage.ref} ({passage.refID}) ({passage.verses.length} verses)</h1>
-            {#each passage.verses as verse}
-              <h3>{verse.ref} ({verse.refID})</h3>
-              {@html verse.textFormatted}
-            {/each}
-          {/each}
-        {/if}
+        {#each data.passages as passage}
+          <h1>{passage.ref} ({passage.version})</h1>
+          <PortableText
+            blocks={passage.content}
+            serializers={{
+              marks: {
+                chapternum: ChapterNum,
+                versenum: VerseNum,
+                reference: Reference,
+                br: Br
+              },
+              blockStyles: {
+                hang: Hang,
+                poetry: Poetry,
+                indent: Indent,
+                'long-aside': LongAside,
+                'short-aside': ShortAside
+              }
+            }}
+          />
+        {/each}
       {/if}
     </div>
   </div>

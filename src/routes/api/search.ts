@@ -1,262 +1,322 @@
 import { VERSIONS, BOOKS } from '$lib/bibleData'
 import { dev } from '$app/env'
-import unidecode from 'unidecode'
 import * as cheerio from 'cheerio'
+import type { RequestHandler } from '@sveltejs/kit'
+import {
+  filterHTML,
+  insertSiblingIfNotExists,
+  prependToNearest,
+  removeAttribute,
+  removeClasses,
+  removeElements,
+  replaceClass,
+  replaceTag,
+  unwrapElements,
+  wrapEveryElement,
+  deserializeHTML
+} from '$lib/domHelpers'
 
-const BASE_URL = `https://www.biblegateway.com/passage/?`
-
-const transliterate = (str: string) => {
-  return unidecode(
-    str.replace(/¶/g, '').replace(/(?<=\w[.,;])(?=\w)|(?<=")(?=")| {2,}/g, ' ')
-  ).trim() as string
+const ERROR_DICT = {
+  400: 'make sure you use a valid reference and version.',
+  404: 'the reference or version does not exist.',
+  408: 'Request timeout.',
+  504: 'Gateway timeout.',
+  500: 'Server error.'
 }
 
-const createError = ({
+const generalHTTPError = ({
   status = 400,
-  message = 'An unknown error occurred.',
+  message = '',
   data = undefined
 }: {
   status?: number
   message?: string
-  data?: unknown
+  data?: { [key: string]: string | number }
 }) => {
   return {
     status,
     body: {
-      error: message,
+      error: message || 'An unknown error occurred.',
       data: data
     }
   }
 }
 
-const getData = async (ref, version, ignoreDev) => {
-  ref = encodeURIComponent(ref)
-  version = encodeURIComponent(version)
+const generateQueryString = (query: { [key: string]: string }) => {
+  let queryString = '?'
+  for (const property in query) {
+    queryString += `${encodeURIComponent(property)}=${encodeURIComponent(query[property])}&`
+  }
 
-  if (dev && ignoreDev === null) {
+  return queryString
+}
+
+const getWebsiteHTML = async ({
+  baseurl = '',
+  query = {},
+  searchSelector = '*',
+  customDevHTML = ''
+}: {
+  baseurl?: string
+  query?: { [key: string]: string }
+  searchSelector?: string
+  customDevHTML?: string
+}) => {
+  let text = ''
+  // check if custom HTML was passed for development
+  if (customDevHTML) text = customDevHTML
+  else {
+    // error if no baseurl
+    if (!baseurl) return 500
+
+    // error if fails to fetch
+    const res = await fetch(baseurl + generateQueryString(query))
+    if (!res.ok) return res.status
+
+    text = await res.text()
+  }
+  // error if search not found
+  const $ = cheerio.load(text)
+  if (!$(searchSelector).length) return 404
+
+  // return cheerio
+  return $
+}
+
+const getBibleSite = async ({ ref = '', version = '' }) => {
+  // error if query params not passed
+  if (!ref || (!dev && !VERSIONS.getId(version))) return 400
+
+  // pass pregenerated HTML to limit requests during development
+  if (dev) {
     switch (version) {
       case 'NIV':
-        return (await import('$lib/devHTML')).TEST_NIV
+      case 'niv':
+        return await getWebsiteHTML({
+          customDevHTML: (await import('$lib/devHTML')).TEST_NIV
+        })
       case 'ESV':
-        return (await import('$lib/devHTML')).TEST_ESV
+      case 'esv':
+        return await getWebsiteHTML({
+          customDevHTML: (await import('$lib/devHTML')).TEST_ESV
+        })
       case 'MSG':
-        return (await import('$lib/devHTML')).TEST_MSG
+      case 'msg':
+        return await getWebsiteHTML({
+          customDevHTML: (await import('$lib/devHTML')).TEST_MSG
+        })
       case 'VOICE':
-        return (await import('$lib/devHTML')).TEST_VOICE
+      case 'voice':
+        return await getWebsiteHTML({
+          customDevHTML: (await import('$lib/devHTML')).TEST_VOICE
+        })
+      case version.match(/^FETCH_WEB/)?.input:
+      case version.match(/^fetch_web/)?.input:
+        version = version.split('|')[1]
+        break
       default:
-        if (ref === 'FAIL_REFERENCE') return `<html><body><h1>Ref not found</h1></body></html>`
-        return 404
+        return await getWebsiteHTML({
+          customDevHTML: `<html><body><h1>Ref not found</h1></body></html>`,
+          searchSelector: '.passage-col'
+        })
     }
   }
 
-  const url = `${BASE_URL}search=${ref}&version=${version}`
-  const res = await fetch(url)
-  if (!res.ok) return res.status
-  return await res.text()
-}
+  version = VERSIONS.getId(version)
 
-const sanitizeForVerses = ($: cheerio.CheerioAPI, passage: cheerio.Element) => {
-  const psg = $('.passage-content', passage)
-
-  // unwrap everything but bold, italics, verses, and paragraphs
-  $(':not(span[class*="-"][class^="text"], br, p, i, b)', psg).contents().unwrap()
-
-  // remove comments
-  psg.html(psg.html().replace(/<!--.*?-->/g, ''))
-
-  // remove empty fields
-  $('*:not(br)', psg).each((id, el) => {
-    $(el).removeClass('text')
-    if ($(el).text() === '') $(el).remove()
-  })
-
-  // remove all attributes, sanitize classes
-  $('*:not(br, span)', psg).each((id, el) => {
-    const classes = ($(el).attr('class') || '')
-      .split(' ')
-      .filter((cls) => /^(left|line|hang)/.test(cls))
-      .map((cls) => {
-        if (cls.includes('line')) return 'poetry'
-        if (cls.includes('left')) return 'indent'
-        if (cls.includes('hang')) return 'hang'
-      })
-      .join(' ')
-
-    $(el).removeAttr(Object.keys($(el).attr()).join(' '))
-
-    if (classes) $(el).attr('class', classes)
+  // get website HTML for bible
+  const baseurl = `https://www.biblegateway.com/passage/`
+  return await getWebsiteHTML({
+    baseurl,
+    query: { search: ref, version },
+    searchSelector: '.passage-col'
   })
 }
 
-const sanitizeForPassage = ($: cheerio.CheerioAPI, passage: cheerio.Element) => {
-  const psg = $('.passage-content', passage)
-
-  // remove spans
-  $('span', psg).contents().unwrap()
-
-  // add spaces
-  psg.html(psg.html().replace(/></g, '> <'))
+const addStyle = (tag: string, attributes: Record<string, string>): string => {
+  const predefinedStyles = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote']
+  if (attributes?.class) return attributes.class
+  if (predefinedStyles.includes(tag)) return tag
+  return 'normal'
 }
 
-const extractVerses = ($: cheerio.CheerioAPI, passage: cheerio.Element) => {
-  const psg = $('.passage-content', passage)
-  return $('span', psg)
-    .map((id, el) => {
-      const refID = $(el).attr('class')
-      const [bookID, chapter, verse, , , toVerse] = refID.split('-')
-      const text = $(el).text()
-      let textFormatted = $(el).html()
+const addMarks = (
+  tag: string,
+  attributes: Record<string, string>,
+  oldMarkDefs: Record<string, unknown>[]
+): [string[], Record<string, unknown>[]] => {
+  const predefinedMarks = ['strong', 'em', 'sup', 'underline', 'strike-through', 'br']
+  const marks = []
+  const newMarkDefs = []
+  if (predefinedMarks.includes(tag)) marks.push(tag)
+  if (attributes?.class) {
+    const classes = attributes.class.split(' ')
+    for (const className of classes) {
+      marks.push(className)
+      if (['versenum', 'chapternum'].includes(className)) continue
+      if (oldMarkDefs.some((def) => def._key === className)) continue
 
-      if ($(`[class="${refID}"]`, psg).length > 1) {
-        if ($(`[class="${refID}"]`, psg).last().text() !== $(el).text()) {
-          if ($(el).next('br').length) textFormatted += ' <br>'
-          else textFormatted += ' <br><br>'
-        }
-      }
-
-      return {
-        refID,
+      const [bookID, chapter, verse, , , toVerse] = className.split('-')
+      newMarkDefs.push({
+        _key: className,
+        _type: 'reference',
         ref: `${BOOKS.getName(bookID) || bookID} ${chapter}:${verse}${
-          toVerse ? `-${toVerse}` : ``
+          toVerse ? `-${toVerse}` : ''
         }`,
         bookID,
         book: BOOKS.getName(bookID) || bookID,
         chapter: Number(chapter),
         verse: Number(verse),
-        toVerse: Number(toVerse) || undefined,
-        textFormatted: transliterate(textFormatted),
-        text: transliterate(text)
-      }
-    })
-    .toArray()
-    .reduce(
-      (acc, verse) => {
-        if (acc.length && acc[acc.length - 1].refID === verse.refID) {
-          acc[acc.length - 1].text += ` ${verse.text}`
-          acc[acc.length - 1].textFormatted += verse.textFormatted
-        } else acc.push(verse)
-        return acc
-      },
-      [] as {
-        refID: string
-        ref: string
-        bookID: string
-        book: string
-        chapter: number
-        verse: number
-        toVerse: number
-        textFormatted: string
-        text: string
-      }[]
-    )
-}
-
-const extractRefID = (
-  verses: {
-    refID: string
-    ref: string
-    bookID: string
-    book: string
-    chapter: number
-    verse: number
-    toVerse: number
-    textFormatted: string
-    text: string
-  }[]
-) => {
-  const firstVerse = verses[0]
-  const lastVerse = verses[verses.length - 1]
-  const refID = `${firstVerse.bookID}-${firstVerse.chapter}-${
-    firstVerse.toVerse || firstVerse.verse
-  }`
-  if (verses.length - 1 !== 0)
-    return `${refID}-${lastVerse.bookID}-${lastVerse.chapter}-${
-      lastVerse.toVerse || lastVerse.verse
-    }`
-
-  return refID
-}
-
-const extractPassage = ($: cheerio.CheerioAPI, passage: cheerio.Element) => {
-  const psg = $(passage)
-
-  sanitizeForVerses($, passage)
-
-  // const verses = $('span', psg).length
-  const verses = extractVerses($, passage)
-
-  sanitizeForPassage($, passage)
-
-  return {
-    refID: extractRefID(verses),
-    ref: transliterate($('.bcv .dropdown-display-text', psg).text()),
-    versionID: transliterate(psg.data('translation') as string),
-    version: transliterate($('.translation .dropdown-display-text', psg).text()),
-    passageFormatted: transliterate($('.passage-content', psg).html()),
-    passage: transliterate($('.passage-content', psg).text()),
-    verses
+        ...(Number(toVerse) && { toVerse: Number(toVerse) })
+      })
+    }
   }
+  return [marks, newMarkDefs]
 }
 
-/**
- * @type {import('@sveltejs/kit').RequestHandler}
- */
-export async function get({ query }) {
-  const ref = query.get('ref') || undefined
-  const ignoreDev = query.get('IGNORE_DEV')
-  const version = VERSIONS.getId(query.get('version'))
+export const get: RequestHandler = async ({ query }) => {
+  const ref = query.get('ref')
+  const version = query.get('version')
+  const $ = await getBibleSite({ ref, version })
 
-  // error if ref or version is not specified
-  if (!ref || !version)
-    return createError({
-      message: 'Please include a reference and a version.',
-      data: { ref, version }
+  if (typeof $ === 'number')
+    return generalHTTPError({
+      status: $,
+      message: ERROR_DICT?.[$],
+      data: { ref, version: version }
     })
 
-  const text = await getData(ref, version, ignoreDev)
+  // filter HTML by removing contents and replacing HTML with only the selected portion
+  filterHTML($, '.passage-col')
 
-  // error if page is not loaded
-  if (typeof text === 'number')
-    return createError({
-      status: text,
-      message: 'fetch failed. Bad internet?',
-      data: { ref, version }
-    })
+  // remove uncesscary elements
+  removeElements($, 'html', [
+    'sup.crossreference',
+    'sup.footnote',
+    'div.crossrefs',
+    'div.footnotes',
+    'a:not(.bibleref)',
+    'div.copyright-table',
+    'div.dropdowns',
+    'div.clearfix',
+    'div.il-text',
+    'div.passage-other-trans',
+    'head'
+  ])
 
-  const $ = cheerio.load(text)
+  // remove unecessary classes
+  removeClasses($, 'html', [/^text$/, /^chapter-/, /^first-line/, /^top/])
 
-  // error if reference is invalid
-  if (!$('.passage-col').length)
-    return createError({
-      status: 404,
-      message: 'invalid reference.',
-      data: { ref, version }
-    })
+  // remove uncesscary attributes
+  removeAttribute($, 'html', '[class=""]', 'class')
+  removeAttribute($, 'html', '[style]', 'style')
+  removeAttribute($, 'html', '[id]', 'id')
 
-  $(`
-    sup.crossreference,
-    sup.footnote,
-    div.crossrefs,
-    div.footnotes,
-    h3,
-    sup.versenum,
-    span.chapternum,
-    a,
-    div.long-aside,
-    div.short-aside,
-    div.copyright-table
-  `).remove()
+  // unwrap elements that are unecessary
+  unwrapElements($, 'html', [
+    'div.poetry',
+    'span.indent-1',
+    'span.indent-2',
+    'span.indent-3',
+    'span.indent-1-breaks',
+    'span.indent-2-breaks',
+    'span.indent-3-breaks',
+    'div.dropdown-display',
+    'div.dropdown-display-text',
+    'div.text-html',
+    'div.passage-content',
+    'h1.passage-display',
+    'div.list',
+    'div.std-text',
+    'div:not([class])',
+    'div.long-aside>p',
+    'div.short-aside>p',
+    'a.bibleref'
+  ])
 
-  const passages = $('.passage-col')
-    .map((id, el) => {
-      return extractPassage($, el)
+  // insert missing verse labels
+  insertSiblingIfNotExists($, '.chapternum', '.versenum', '<sup class="versenum">1&nbsp;</sup>')
+
+  // place empty text inside of the nearest verse
+  prependToNearest($, 'p', 'span', 3)
+
+  // do the same with any new lines
+  prependToNearest($, 'p', 'span', 'br')
+
+  // make sure there are no text nodes within each verse
+  wrapEveryElement($, 'html', 'span[class]:not(span[class="versenum"], span[class="chapternum"])')
+
+  // replace class names with the ones desired
+  replaceClass($, 'html', /^line$/, 'poetry')
+  replaceClass($, 'html', /^left/, 'indent')
+  replaceClass($, 'html', /^hang/, 'hang')
+
+  // replace tag names with the ones desired
+  replaceTag($, 'html', 'b', 'strong')
+  replaceTag($, 'html', 'i', 'em')
+  replaceTag($, 'html', 'sup.versenum', 'span')
+  replaceTag($, 'html', 'div.long-aside', 'p')
+  replaceTag($, 'html', 'div.short-aside', 'p')
+
+  // replace verse tags by unwrapping and shuffling attriubtes down
+  replaceTag($, 'html', 'span[class]:not(span[class="versenum"], span[class="chapternum"])', false)
+
+  // make sure any remmant spans are unwrapped
+  unwrapElements($, 'html', 'span:not([class])')
+
+  // make contents of br equal to a new line
+  $('br', 'html').text('\n')
+
+  // deserialize passages
+  const passages = $('.passage-text')
+    .map((i) => {
+      const passage = {
+        ref: $('.bcv').eq(i).text(),
+        refID: undefined,
+        version: $('.translation').eq(i).text(),
+        versionID: undefined,
+        book: undefined,
+        bookID: undefined,
+        chapter: undefined,
+        verse: undefined,
+        toBook: undefined,
+        toBookID: undefined,
+        toChapter: undefined,
+        toVerse: undefined,
+        content: deserializeHTML($, '.passage-text', i, addStyle, addMarks)
+      }
+
+      const lastBlock = passage.content.length - 1
+      const lastMarkDef = passage.content[lastBlock].markDefs.length - 1
+
+      const { bookID: bID1, chapter: cID1, verse: vID1 } = passage.content[0].markDefs[0]
+
+      const {
+        bookID: bID2,
+        chapter: cID2,
+        verse: vID2,
+        toVerse: tvID2
+      } = passage.content[lastBlock].markDefs[lastMarkDef]
+
+      passage.versionID = VERSIONS.getId(passage.version)
+      passage.book = BOOKS.getName(bID1)
+      passage.toBook = BOOKS.getName(bID2)
+      passage.chapter = cID1
+      passage.toChapter = cID2
+      passage.verse = vID1
+      passage.toVerse = tvID2 || vID2
+      passage.refID = `${bID1}-${cID1}-${vID1}-${bID2}-${cID2}-${tvID2 || vID2}`
+
+      return passage
     })
     .toArray()
 
   return {
+    status: 200,
+    // body: '<body>' + $.html() + '</body>'
     body: {
-      searchRef: ref as string,
-      searchVersion: version as string,
+      searchRef: ref,
+      searchVersion: version,
       passages
     }
   }
